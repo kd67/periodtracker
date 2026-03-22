@@ -2,13 +2,19 @@ import { useState, useEffect } from 'react';
 import { Calendar, Plus, Droplets } from 'lucide-react';
 import PeriodCalendar from './components/PeriodCalendar';
 import StatsPanel from './components/StatsPanel';
+import RemindersPanel from './components/RemindersPanel';
 import AddPeriodModal from './components/AddPeriodModal';
-import { Period, calculateCycleStats } from './utils/periodUtils';
+import { Period, calculateCycleStats, getDaysUntilDate } from './utils/periodUtils';
+import { notificationManager } from './utils/notificationManager';
 
 function App() {
   const [periods, setPeriods] = useState<Period[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingPeriod, setEditingPeriod] = useState<Period | null>(null);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(() => {
+    const saved = localStorage.getItem('notifications_enabled');
+    return saved ? JSON.parse(saved) : false;
+  });
 
   useEffect(() => {
     const saved = localStorage.getItem('periods');
@@ -20,6 +26,40 @@ function App() {
   useEffect(() => {
     localStorage.setItem('periods', JSON.stringify(periods));
   }, [periods]);
+
+  useEffect(() => {
+    localStorage.setItem('notifications_enabled', JSON.stringify(notificationsEnabled));
+  }, [notificationsEnabled]);
+
+  useEffect(() => {
+    if (!notificationsEnabled) return;
+
+    const stats = calculateCycleStats(periods);
+    if (!stats.nextPeriodDate) return;
+
+    const daysUntil = getDaysUntilDate(stats.nextPeriodDate);
+    const reminders: Array<{ days: number; label: 'D-7' | 'D-3' | 'D-1' }> = [
+      { days: 7, label: 'D-7' },
+      { days: 3, label: 'D-3' },
+      { days: 1, label: 'D-1' },
+    ];
+
+    reminders.forEach((reminder) => {
+      if (
+        daysUntil === reminder.days &&
+        !notificationManager.hasNotificationBeenSent(reminder.label, stats.nextPeriodDate)
+      ) {
+        notificationManager.sendNotification(
+          'Period Reminder',
+          {
+            body: `Your period is expected in ${reminder.days} day${reminder.days > 1 ? 's' : ''}`,
+            tag: `period-reminder-${reminder.label}`,
+          }
+        );
+        notificationManager.recordNotificationSent(reminder.label);
+      }
+    });
+  }, [periods, notificationsEnabled]);
 
   const addPeriod = (startDate: string, endDate: string) => {
     if (editingPeriod) {
@@ -71,7 +111,14 @@ function App() {
         </header>
 
         <div className="grid md:grid-cols-3 gap-6 mb-8">
-          <StatsPanel stats={stats} />
+          <div className="md:col-span-2">
+            <StatsPanel stats={stats} />
+          </div>
+          <RemindersPanel
+            nextPeriodDate={stats.nextPeriodDate}
+            notificationsEnabled={notificationsEnabled}
+            onToggleNotifications={setNotificationsEnabled}
+          />
         </div>
 
         <div className="bg-white rounded-2xl shadow-lg p-6 mb-6">

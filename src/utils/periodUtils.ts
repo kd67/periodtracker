@@ -77,3 +77,33 @@ export function getDaysBetween(date1: string, date2: string): number {
   const d2 = new Date(date2);
   return Math.round((d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24));
 }
+
+export function getDaysUntilDate(targetDate: string): number {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(targetDate);
+  target.setHours(0, 0, 0, 0);
+  return Math.round((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+export function getReminderDates(nextPeriodDate: string | null): { daysUntil: number; message: string }[] {
+  if (!nextPeriodDate) return [];
+
+  const reminders = [
+    { days: 7, label: 'D-7' },
+    { days: 3, label: 'D-3' },
+    { days: 1, label: 'D-1' },
+  ];
+
+  return reminders
+    .map((reminder) => {
+      const daysUntil = getDaysUntilDate(nextPeriodDate);
+      return {
+        daysUntil,
+        message: `Period expected in ${reminder.days} day${reminder.days > 1 ? 's' : ''}`,
+        label: reminder.label,
+        triggerDay: daysUntil <= reminder.days && daysUntil > reminder.days - 1,
+      };
+    })
+    .filter((r) => r.triggerDay);
+}
