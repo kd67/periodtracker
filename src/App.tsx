@@ -6,33 +6,26 @@ import RemindersPanel from './components/RemindersPanel';
 import AddPeriodModal from './components/AddPeriodModal';
 import { Period, calculateCycleStats, getDaysUntilDate } from './utils/periodUtils';
 import { notificationManager } from './utils/notificationManager';
+import { useAuth } from './context/AuthContext';
+import { usePeriods } from './hooks/usePeriods';
+import { useNotifications } from './hooks/useNotifications';
 
-function App() {
-  const [periods, setPeriods] = useState<Period[]>([]);
+function AppContent() {
+  const { loading: authLoading } = useAuth();
+  const {
+    periods,
+    loading: periodsLoading,
+    addPeriod: addPeriodToDb,
+    updatePeriod: updatePeriodInDb,
+    deletePeriod: deletePeriodFromDb,
+  } = usePeriods();
+  const { notificationsEnabled, setNotificationsEnabled, hasNotificationBeenSent, recordNotificationSent } = useNotifications();
+
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingPeriod, setEditingPeriod] = useState<Period | null>(null);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(() => {
-    const saved = localStorage.getItem('notifications_enabled');
-    return saved ? JSON.parse(saved) : false;
-  });
 
   useEffect(() => {
-    const saved = localStorage.getItem('periods');
-    if (saved) {
-      setPeriods(JSON.parse(saved));
-    }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem('periods', JSON.stringify(periods));
-  }, [periods]);
-
-  useEffect(() => {
-    localStorage.setItem('notifications_enabled', JSON.stringify(notificationsEnabled));
-  }, [notificationsEnabled]);
-
-  useEffect(() => {
-    if (!notificationsEnabled) return;
+    if (!notificationsEnabled || authLoading) return;
 
     const stats = calculateCycleStats(periods);
     if (!stats.nextPeriodDate) return;
@@ -44,47 +37,35 @@ function App() {
       { days: 1, label: 'D-1' },
     ];
 
-    reminders.forEach((reminder) => {
-      if (
-        daysUntil === reminder.days &&
-        !notificationManager.hasNotificationBeenSent(reminder.label, stats.nextPeriodDate)
-      ) {
-        notificationManager.sendNotification(
-          'Period Reminder',
-          {
-            body: `Your period is expected in ${reminder.days} day${reminder.days > 1 ? 's' : ''}`,
-            tag: `period-reminder-${reminder.label}`,
-          }
-        );
-        notificationManager.recordNotificationSent(reminder.label);
+    reminders.forEach(async (reminder) => {
+      if (daysUntil === reminder.days) {
+        const hasBeenSent = await hasNotificationBeenSent(reminder.label);
+        if (!hasBeenSent) {
+          notificationManager.sendNotification(
+            'Period Reminder',
+            {
+              body: `Your period is expected in ${reminder.days} day${reminder.days > 1 ? 's' : ''}`,
+              tag: `period-reminder-${reminder.label}`,
+            }
+          );
+          await recordNotificationSent(reminder.label);
+        }
       }
     });
-  }, [periods, notificationsEnabled]);
+  }, [periods, notificationsEnabled, authLoading, hasNotificationBeenSent, recordNotificationSent]);
 
-  const addPeriod = (startDate: string, endDate: string) => {
+  const addPeriod = async (startDate: string, endDate: string) => {
     if (editingPeriod) {
-      const updated = periods.map(p =>
-        p.id === editingPeriod.id ? { ...p, startDate, endDate } : p
-      ).sort((a, b) =>
-        new Date(b.startDate).getTime() - new Date(a.startDate).getTime()
-      );
-      setPeriods(updated);
+      await updatePeriodInDb(editingPeriod.id, startDate, endDate);
       setEditingPeriod(null);
     } else {
-      const newPeriod: Period = {
-        id: Date.now().toString(),
-        startDate,
-        endDate,
-      };
-      setPeriods([...periods, newPeriod].sort((a, b) =>
-        new Date(b.startDate).getTime() - new Date(a.startDate).getTime()
-      ));
+      await addPeriodToDb(startDate, endDate);
     }
     setShowAddModal(false);
   };
 
-  const deletePeriod = (id: string) => {
-    setPeriods(periods.filter(p => p.id !== id));
+  const deletePeriod = async (id: string) => {
+    await deletePeriodFromDb(id);
   };
 
   const handleEditPeriod = (period: Period) => {
@@ -98,6 +79,16 @@ function App() {
   };
 
   const stats = calculateCycleStats(periods);
+
+  if (authLoading || periodsLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-rose-50 to-pink-50 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-rose-50 to-pink-50">
@@ -153,6 +144,16 @@ function App() {
         )}
       </div>
     </div>
+  );
+}
+
+import { AuthProvider } from './context/AuthContext';
+
+function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }
 
